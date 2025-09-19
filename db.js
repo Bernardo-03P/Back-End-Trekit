@@ -1,34 +1,38 @@
 const { Pool } = require("pg");
-require("dotenv").config(); // Garante que as variáveis do .env sejam lidas para testes locais
 
-const isProduction = process.env.NODE_ENV === "production";
+let pool; // Variável para armazenar a conexão (padrão singleton)
 
-const connectionString = process.env.DATABASE_URL;
+function getPool() {
+    if (!pool) {
+        console.log("Creating new PostgreSQL connection pool...");
 
-if (!connectionString) {
-    throw new Error("A variável de ambiente DATABASE_URL não foi definida.");
+        if (!process.env.DATABASE_URL) {
+            throw new Error("FATAL: DATABASE_URL environment variable is not set.");
+        }
+
+        pool = new Pool({
+            connectionString: process.env.DATABASE_URL,
+            // Configuração SSL exigida por provedores como Heroku e Render
+            ssl: {
+                rejectUnauthorized: false
+            }
+        });
+
+        // Teste de conexão ao criar o pool
+        pool.query('SELECT NOW()', (err, res) => {
+            if (err) {
+                console.error('CRITICAL ERROR: Failed to connect to PostgreSQL.', err.stack);
+                // Em caso de falha, resetamos o pool para tentar reconectar na próxima vez
+                pool = null; 
+            } else {
+                console.log('Successfully connected to PostgreSQL database pool.');
+            }
+        });
+    }
+    return pool;
 }
 
-// Configuração SSL exigida por provedores como Heroku e Render
-const sslConfig = isProduction 
-    ? { ssl: { rejectUnauthorized: false } } 
-    : {};
-
-const pool = new Pool({
-    connectionString,
-    ...sslConfig // Adiciona a configuração de SSL se estiver em produção
-});
-
-// Apenas um teste de conexão para o console
-pool.query('SELECT NOW()', (err) => {
-    if (err) {
-        console.error('CRITICAL ERROR: Failed to connect to PostgreSQL.', err.stack);
-    } else {
-        console.log('Successfully connected to PostgreSQL database pool.');
-    }
-});
-
 module.exports = {
-  query: (text, params) => pool.query(text, params),
-  getClient: () => pool.connect(), 
+  query: (text, params) => getPool().query(text, params),
+  getClient: () => getPool().connect(), 
 };
