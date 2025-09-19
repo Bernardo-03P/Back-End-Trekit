@@ -73,14 +73,27 @@ app.use(decodeToken);
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { nome, email, username, senha } = req.body;
+        
+        // Validação de entrada
+        if (!nome || !email || !username || !senha) {
+            return res.status(400).json({ message: "Todos os campos são obrigatórios." });
+        }
+
         const userCheck = await db.query("SELECT * FROM users WHERE email = $1", [email]);
-        if (userCheck.rows.length > 0) return res.status(409).json({ message: "E-mail já cadastrado." });
+        if (userCheck.rows.length > 0) {
+            return res.status(409).json({ message: "E-mail já cadastrado." });
+        }
+
         const salt = await bcrypt.genSalt(10);
         const senhaCriptografada = await bcrypt.hash(senha, salt);
+        
         await db.query("INSERT INTO users(nome, email, username, senha) VALUES ($1, $2, $3, $4)", [nome, email, username, senhaCriptografada]);
-        res.status(201).json({ message: "Usuário registrado com sucesso." });
+        
+        // Retorna apenas uma mensagem de sucesso. O usuário agora precisa fazer login.
+        res.status(201).json({ message: "Usuário registrado com sucesso! Por favor, faça o login." });
+    
     } catch (err) {
-        console.error("Erro em POST /api/auth/register:", err);
+        console.error("ERRO NO REGISTRO:", err.stack); // Isso mostrará o erro exato no log do Render
         res.status(500).json({ error: "Erro interno ao tentar registrar usuário." });
     }
 });
