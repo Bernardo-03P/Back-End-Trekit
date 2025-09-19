@@ -222,7 +222,7 @@ app.post('/api/trilhas', uploadTrilha.array('imagens', 5), async (req, res) => {
         }
         
         const trilhaSql = `
-            INSERT INTO trilhas(nome, bairro, cidade, localizacao_maps, distancia_km, tempo_min, dificuldade, sinalizacao, autor_id, descricao, mapa_embed_url) 
+            INSERT INTO trilhas(nome, bairro, localizacao_maps, distancia_km, tempo_min, dificuldade, sinalizacao, autor_id, descricao, mapa_embed_url) 
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
             RETURNING id;
         `;
@@ -232,7 +232,6 @@ app.post('/api/trilhas', uploadTrilha.array('imagens', 5), async (req, res) => {
         const values = [
             nome, 
             bairro, 
-            'Florianópolis-SC',
             localizacao_maps, 
             distancia_km, 
             tempo_min || null, 
