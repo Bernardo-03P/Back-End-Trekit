@@ -193,14 +193,27 @@ app.get('/api/trilhas/:id', async (req, res) => {
 app.post('/api/trilhas', uploadTrilha.array('imagens', 5), async (req, res) => {
     let client;
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Autenticação necessária para criar uma trilha." });
+        }
+        
         client = await db.getClient();
-        await client.query('BEGIN');
-        const { nome, bairro, localizacao_maps, distancia_km, tempo_min, dificuldade, sinalizacao, autor_id, descricao, mapa_embed_url } = req.body;
-        if (!nome || !bairro || !distancia_km || !dificuldade || !sinalizacao || !autor_id) return res.status(400).json({ error: "Campos obrigatórios estão faltando." });
+        await client.query('BEGIN'); // Inicia a transação
+
+        // Correção 1: Pega o autor_id com segurança do token decodificado
+        const autor_id = req.user.id; 
+        
+        // Correção 2: Pega o resto dos dados do corpo da requisição
+        const { nome, bairro, localizacao_maps, distancia_km, tempo_min, dificuldade, sinalizacao, descricao, mapa_embed_url } = req.body;
+        
+        if (!nome || !bairro || !distancia_km || !dificuldade || !sinalizacao) {
+            return res.status(400).json({ error: "Campos obrigatórios estão faltando." });
+        }
         
         const trilhaSql = `
             INSERT INTO trilhas(nome, bairro, cidade, localizacao_maps, distancia_km, tempo_min, dificuldade, sinalizacao, autor_id, descricao, mapa_embed_url) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id;
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
+            RETURNING id;
         `;
         const values = [nome, bairro, 'Florianópolis-SC', localizacao_maps, distancia_km, tempo_min, dificuldade, sinalizacao, autor_id, descricao, mapa_embed_url];
         const trilhaResult = await client.query(trilhaSql, values);
@@ -209,20 +222,24 @@ app.post('/api/trilhas', uploadTrilha.array('imagens', 5), async (req, res) => {
         if (req.files && req.files.length > 0) {
             const imagePromises = req.files.map(file => {
                 const imageSql = `INSERT INTO trilha_imagens(trilha_id, nome_arquivo, caminho_arquivo) VALUES ($1, $2, $3);`;
-                // `file.filename` é o ID único do Cloudinary.
-                // `file.path` é a URL completa e segura (https://...)
                 return client.query(imageSql, [newTrilhaId, file.filename, file.path]);
             });
             await Promise.all(imagePromises);
         }
+
         await client.query('COMMIT');
-        res.status(201).json({ message: 'Trilha criada com sucesso!', id: newTrilhaId });
+        res.status(201).json({ message: 'Trilha criada com sucesso e enviada para aprovação!', id: newTrilhaId });
+        
     } catch (err) {
-        if (client) await client.query('ROLLBACK');
-        console.error("Erro em POST /api/trilhas:", err);
-        res.status(500).json({ error: "Erro interno ao criar a trilha." });
+        if (client) {
+            await client.query('ROLLBACK');
+        }
+        console.error("ERRO DETALHADO em POST /api/trilhas:", err.stack);
+        res.status(500).json({ error: "Erro interno do servidor ao tentar criar a trilha." });
     } finally {
-        if (client) client.release();
+        if (client) {
+            client.release();
+        }
     }
 });
 
