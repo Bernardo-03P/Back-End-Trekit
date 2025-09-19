@@ -191,52 +191,87 @@ app.get('/api/trilhas/:id', async (req, res) => {
 });
 
 app.post('/api/trilhas', uploadTrilha.array('imagens', 5), async (req, res) => {
-    let client;
+    let client; // Define o 'client' aqui para ser acessível nos blocos catch e finally
+
     try {
+        // 1. Verificação de Autenticação
+        // Garante que a requisição tem um token válido e um usuário associado
         if (!req.user) {
             return res.status(401).json({ error: "Autenticação necessária para criar uma trilha." });
         }
         
+        // 2. Conexão e Início da Transação
         client = await db.getClient();
-        await client.query('BEGIN'); // Inicia a transação
+        await client.query('BEGIN'); // Inicia a transação. Tudo abaixo ou funciona, ou é desfeito.
 
-        // Correção 1: Pega o autor_id com segurança do token decodificado
-        const autor_id = req.user.id; 
+        // 3. Extração e Validação Segura dos Dados
+        const autor_id = req.user.id; // Pega o ID do autor com segurança do token autenticado
+        const { 
+            nome, 
+            bairro, 
+            localizacao_maps, 
+            distancia_km, 
+            tempo_min, 
+            dificuldade, 
+            sinalizacao, 
+            descricao, 
+            mapa_embed_url 
+        } = req.body;
         
-        // Correção 2: Pega o resto dos dados do corpo da requisição
-        const { nome, bairro, localizacao_maps, distancia_km, tempo_min, dificuldade, sinalizacao, descricao, mapa_embed_url } = req.body;
-        
+        // Garante que os campos essenciais foram enviados
         if (!nome || !bairro || !distancia_km || !dificuldade || !sinalizacao) {
             return res.status(400).json({ error: "Campos obrigatórios estão faltando." });
         }
         
+        // 4. Inserção na Tabela `trilhas`
         const trilhaSql = `
             INSERT INTO trilhas(nome, bairro, cidade, localizacao_maps, distancia_km, tempo_min, dificuldade, sinalizacao, autor_id, descricao, mapa_embed_url) 
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
             RETURNING id;
         `;
-        const values = [nome, bairro, 'Florianópolis-SC', localizacao_maps, distancia_km, tempo_min, dificuldade, sinalizacao, autor_id, descricao, mapa_embed_url];
+        const values = [
+            nome, 
+            bairro, 
+            'Florianópolis-SC', // Valor Padrão
+            localizacao_maps, 
+            distancia_km, 
+            tempo_min || null, // Trata o campo numérico opcional corretamente
+            dificuldade, 
+            sinalizacao, 
+            autor_id, 
+            descricao, 
+            mapa_embed_url
+        ];
+        
         const trilhaResult = await client.query(trilhaSql, values);
         const newTrilhaId = trilhaResult.rows[0].id;
 
+        // 5. Inserção das Imagens no Cloudinary e no Banco de Dados
         if (req.files && req.files.length > 0) {
             const imagePromises = req.files.map(file => {
                 const imageSql = `INSERT INTO trilha_imagens(trilha_id, nome_arquivo, caminho_arquivo) VALUES ($1, $2, $3);`;
+                // file.filename é o ID único do Cloudinary.
+                // file.path é a URL completa e segura (https://...)
                 return client.query(imageSql, [newTrilhaId, file.filename, file.path]);
             });
             await Promise.all(imagePromises);
         }
 
-        await client.query('COMMIT');
+        // 6. Confirmação da Transação
+        await client.query('COMMIT'); // Se tudo deu certo, salva as alterações permanentemente.
         res.status(201).json({ message: 'Trilha criada com sucesso e enviada para aprovação!', id: newTrilhaId });
         
     } catch (err) {
+        // 7. Rollback em Caso de Erro
+        // Se qualquer passo acima falhar, desfaz todas as operações
         if (client) {
-            await client.query('ROLLBACK');
+            await client.query('ROLLBACK'); 
         }
-        console.error("ERRO DETALHADO em POST /api/trilhas:", err.stack);
+        console.error("ERRO DETALHADO em POST /api/trilhas:", err.stack); // Log detalhado para depuração no Render
         res.status(500).json({ error: "Erro interno do servidor ao tentar criar a trilha." });
     } finally {
+        // 8. Liberação do Cliente
+        // Aconteça o que acontecer, libera a conexão para ser usada por outra pessoa
         if (client) {
             client.release();
         }
