@@ -113,16 +113,19 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/trilhas', async (req, res) => {
     try {
         const loggedInUserId = req.user ? req.user.id : null;
-        let baseQuery = `
-        SELECT t.*, u.nome AS autor_nome, u.id AS autor_id,
-               
-               -- PADRONIZAÇÃO APLICADA AQUI
-               (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id ORDER BY ti.id ASC LIMIT 1) as imagem_principal_url,
-
-               CASE WHEN l.autor_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
-        FROM trilhas t
-        -- ... (resto da query e da lógica que já está correta)
-    `;
+         const baseQuery = `
+            SELECT 
+                t.*, 
+                u.nome AS autor_nome,
+                (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id ORDER BY ti.id ASC LIMIT 1) as imagem_principal_url,
+                CASE WHEN l.autor_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
+            FROM 
+                trilhas t
+            INNER JOIN 
+                users u ON t.autor_id = u.id
+            LEFT JOIN 
+                trilha_likes l ON t.id = l.trilha_id AND l.autor_id = $1
+        `;
         const whereClauses = ["t.status = 'aprovada'"];
         const queryParams = [loggedInUserId];
         let paramIndex = 2;
