@@ -14,35 +14,27 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// --- CONFIGURAÇÃO CENTRALIZADA DO CLOUDINARY ---
+// --- CONFIGURAÇÃO CLOUDINARY E MULTER ---
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-  secure: true // Garante que as URLs sejam sempre https
+  api_secret: process.env.CLOUDINARY_API_SECRET
 });
-
-// --- FUNÇÃO PARA CRIAR STORAGE NO CLOUDINARY ---
 const createCloudinaryStorage = (folderName) => {
     return new CloudinaryStorage({
         cloudinary: cloudinary,
         params: {
             folder: `trekit/${folderName}`,
             allowed_formats: ['jpg', 'png', 'jpeg'],
-            // Otimização: redimensiona imagens grandes para um máximo de 1600x1600
             transformation: [{ width: 1600, height: 1600, crop: "limit" }]
         }
     });
 };
-
-// --- CONFIGURAÇÃO DO MULTER PARA USAR O CLOUDINARY ---
 const uploadAvatar = multer({ storage: createCloudinaryStorage('avatars') });
 const uploadComment = multer({ storage: createCloudinaryStorage('comments') });
 const uploadTrilha = multer({ storage: createCloudinaryStorage('trilhas') });
 
-
-
-// --- MIDDLEWARE DE AUTENTICAÇÃO (JWT) ---
+// --- MIDDLEWARE JWT ---
 const decodeToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -53,7 +45,6 @@ const decodeToken = (req, res, next) => {
     }
     next();
 };
-// APLICANDO O MIDDLEWARE A TODAS AS ROTAS DEFINIDAS APÓS ESTA LINHA
 app.use(decodeToken);
 
 
@@ -111,20 +102,15 @@ app.post('/api/auth/login', async (req, res) => {
    ================================================================== */
 
 app.get('/api/trilhas', async (req, res) => {
-    try {
+     try {
         const loggedInUserId = req.user ? req.user.id : null;
-         const baseQuery = `
-            SELECT 
-                t.*, 
-                u.nome AS autor_nome,
-                (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id ORDER BY ti.id ASC LIMIT 1) as imagem_principal_url,
-                CASE WHEN l.autor_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
-            FROM 
-                trilhas t
-            INNER JOIN 
-                users u ON t.autor_id = u.id
-            LEFT JOIN 
-                trilha_likes l ON t.id = l.trilha_id AND l.autor_id = $1
+        let baseQuery = `
+            SELECT t.*, u.nome AS autor_nome, u.id AS autor_id,
+                   (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id ORDER BY ti.id ASC LIMIT 1) as imagem_principal_url,
+                   CASE WHEN l.autor_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
+            FROM trilhas t
+            INNER JOIN users u ON t.autor_id = u.id
+            LEFT JOIN trilha_likes l ON t.id = l.trilha_id AND l.autor_id = $1
         `;
         const whereClauses = ["t.status = 'aprovada'"];
         const queryParams = [loggedInUserId];
@@ -149,17 +135,13 @@ app.get('/api/trilhas', async (req, res) => {
 app.get('/api/trilhas/sugestoes', async (req, res) => {
     try {
         const trilhaIdExcluida = parseInt(req.query.excluir_id);
-        if (isNaN(trilhaIdExcluida)) return res.status(400).json({ error: "ID a ser excluído é inválido." });
-        
+        if (isNaN(trilhaIdExcluida)) return res.status(400).json({ error: "ID inválido." });
         const sql = `
-        SELECT t.id, t.nome, u.nome as autor_nome,
-               
-               -- PADRONIZAÇÃO APLICADA AQUI
-               (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id ORDER BY ti.id ASC LIMIT 1) as imagem_principal_url
-
-        FROM trilhas t JOIN users u ON t.autor_id = u.id
-        WHERE t.status = 'aprovada' AND t.id != $1 ORDER BY RANDOM() LIMIT 4;
-    `;
+            SELECT t.id, t.nome, u.nome as autor_nome,
+                   (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id LIMIT 1) as imagem_principal_url
+            FROM trilhas t JOIN users u ON t.autor_id = u.id
+            WHERE t.status = 'aprovada' AND t.id != $1 ORDER BY RANDOM() LIMIT 4;
+        `;
         const result = await db.query(sql, [trilhaIdExcluida]);
         res.json(result.rows);
     } catch (err) {
@@ -175,6 +157,7 @@ app.get('/api/trilhas/:id', async (req, res) => {
         const loggedInUserId = req.user ? req.user.id : null;
         if (isNaN(id)) return res.status(400).json({ error: "ID inválido." });
 
+        // Passo 1: Busca a trilha principal.
         const trilhaSql = `
             SELECT t.*, u.nome AS autor_nome, u.avatar_url AS autor_avatar_url,
                    CASE WHEN l.autor_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
@@ -185,105 +168,64 @@ app.get('/api/trilhas/:id', async (req, res) => {
         `;
         const trilhaResult = await db.query(trilhaSql, [loggedInUserId, id]);
         
-        if (trilhaResult.rows.length === 0) return res.status(404).json({ error: "Trilha não encontrada." });
+        // Passo 2: Verifica se a trilha foi encontrada.
+        if (trilhaResult.rows.length === 0) {
+            return res.status(404).json({ error: "Trilha não encontrada." });
+        }
         const trilha = trilhaResult.rows[0];
 
-        // A query principal está OK, mas esta query que busca as imagens precisava de correção.
+        // Passo 3: Busca as imagens da trilha encontrada.
         const imagensResult = await db.query('SELECT id, nome_arquivo, caminho_arquivo FROM trilha_imagens WHERE trilha_id = $1 ORDER BY id ASC;', [id]);
+        
+        // Passo 4: Anexa as imagens ao objeto da trilha.
         trilha.imagens = imagensResult.rows;
 
+        // Passo 5: Envia a resposta completa.
         res.json(trilha);
+
     } catch (err) {
-        console.error(`Erro em GET /api/trilhas/${req.params.id}:`, err);
+        console.error(`Erro em GET /api/trilhas/${req.params.id}:`, err.stack);
         res.status(500).json({ error: "Erro ao buscar detalhes da trilha." });
     }
 });
 
 app.post('/api/trilhas', uploadTrilha.array('imagens', 5), async (req, res) => {
-    let client; // Define o 'client' aqui para ser acessível nos blocos catch e finally
-
+    let client;
     try {
-        // 1. Verificação de Autenticação
-        // Garante que a requisição tem um token válido e um usuário associado
-        if (!req.user) {
-            return res.status(401).json({ error: "Autenticação necessária para criar uma trilha." });
-        }
+        if (!req.user) return res.status(401).json({ error: "Autenticação necessária." });
         
-        // 2. Conexão e Início da Transação
         client = await db.getClient();
-        await client.query('BEGIN'); // Inicia a transação. Tudo abaixo ou funciona, ou é desfeito.
+        await client.query('BEGIN');
 
-        // 3. Extração e Validação Segura dos Dados
-        const autor_id = req.user.id; // Pega o ID do autor com segurança do token autenticado
-        const { 
-            nome, 
-            bairro, 
-            localizacao_maps, 
-            distancia_km, 
-            tempo_min, 
-            dificuldade, 
-            sinalizacao, 
-            descricao, 
-            mapa_embed_url 
-        } = req.body;
+        const autor_id = req.user.id; 
+        const { nome, bairro, distancia_km, dificuldade, sinalizacao, tempo_min, ...outrosCampos } = req.body;
+        if (!nome || !bairro || !distancia_km || !dificuldade || !sinalizacao) return res.status(400).json({ error: "Campos obrigatórios estão faltando." });
         
-        // Garante que os campos essenciais foram enviados
-        if (!nome || !bairro || !distancia_km || !dificuldade || !sinalizacao) {
-            return res.status(400).json({ error: "Campos obrigatórios estão faltando." });
-        }
-        
-        // 4. Inserção na Tabela `trilhas`
         const trilhaSql = `
             INSERT INTO trilhas(nome, bairro, cidade, localizacao_maps, distancia_km, tempo_min, dificuldade, sinalizacao, autor_id, descricao, mapa_embed_url) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
+            VALUES ($1, $2, 'Florianópolis-SC', $3, $4, $5, $6, $7, $8, $9, $10) 
             RETURNING id;
         `;
-        const values = [
-            nome, 
-            bairro, 
-            'Florianópolis-SC', // Valor Padrão
-            localizacao_maps, 
-            distancia_km, 
-            tempo_min || null, // Trata o campo numérico opcional corretamente
-            dificuldade, 
-            sinalizacao, 
-            autor_id, 
-            descricao, 
-            mapa_embed_url
-        ];
-        
+        const values = [nome, bairro, outrosCampos.localizacao_maps, distancia_km, tempo_min || null, dificuldade, sinalizacao, autor_id, outrosCampos.descricao, outrosCampos.mapa_embed_url];
         const trilhaResult = await client.query(trilhaSql, values);
         const newTrilhaId = trilhaResult.rows[0].id;
 
-        // 5. Inserção das Imagens no Cloudinary e no Banco de Dados
         if (req.files && req.files.length > 0) {
             const imagePromises = req.files.map(file => {
                 const imageSql = `INSERT INTO trilha_imagens(trilha_id, nome_arquivo, caminho_arquivo) VALUES ($1, $2, $3);`;
-                // file.filename é o ID único do Cloudinary.
-                // file.path é a URL completa e segura (https://...)
                 return client.query(imageSql, [newTrilhaId, file.filename, file.path]);
             });
             await Promise.all(imagePromises);
         }
-
-        // 6. Confirmação da Transação
-        await client.query('COMMIT'); // Se tudo deu certo, salva as alterações permanentemente.
-        res.status(201).json({ message: 'Trilha criada com sucesso e enviada para aprovação!', id: newTrilhaId });
+        await client.query('COMMIT');
+        res.status(201).json({ message: 'Trilha criada com sucesso!', id: newTrilhaId });
         
     } catch (err) {
-        // 7. Rollback em Caso de Erro
-        // Se qualquer passo acima falhar, desfaz todas as operações
-        if (client) {
-            await client.query('ROLLBACK'); 
-        }
-        console.error("ERRO DETALHADO em POST /api/trilhas:", err.stack); // Log detalhado para depuração no Render
-        res.status(500).json({ error: "Erro interno do servidor ao tentar criar a trilha." });
+        if (client) { await client.query('ROLLBACK'); }
+        console.error("ERRO DETALHADO em POST /api/trilhas:", err.stack);
+        res.status(500).json({ error: "Erro interno ao criar a trilha." });
     } finally {
-        // 8. Liberação do Cliente
-        // Aconteça o que acontecer, libera a conexão para ser usada por outra pessoa
-        if (client) {
-            client.release();
-        }
+        if (client) { client.release(); }
     }
 });
 
