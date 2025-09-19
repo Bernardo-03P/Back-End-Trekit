@@ -268,27 +268,39 @@ app.delete('/api/trilhas/:id/like', async (req, res) => {
 // B) Comentários
 app.get('/api/trilhas/:id/comentarios', async (req, res) => {
     try {
-        const trilhaId = parseInt(req.params.id);
+        const idDaTrilha = parseInt(req.params.id); // Usando um nome de variável claro
         const loggedInUserId = req.user ? req.user.id : null;
-        if (isNaN(trilhaId)) return res.status(400).json({ error: "ID da trilha inválido." });
+
+        if (isNaN(idDaTrilha)) {
+            return res.status(400).json({ error: "ID da trilha inválido." });
+        }
 
         const sql = `
-            SELECT c.id, c.conteudo, c.created_at, u.nome AS autor_nome, u.id as autor_id, u.avatar_url as autor_avatar_url,
-                   (SELECT COUNT(*) FROM comentario_likes cl WHERE cl.comentario_id = c.id) as like_count,
-                   CASE WHEN EXISTS (SELECT 1 FROM comentario_likes cl WHERE cl.comentario_id = c.id AND cl.autor_id = $2) THEN true ELSE false END AS is_liked_by_user
-            FROM comentarios c JOIN users u ON c.autor_id = u.id 
-            WHERE c.trilha_id = $1 ORDER BY c.created_at DESC;
+            SELECT 
+                c.id, c.conteudo, c.created_at, 
+                u.nome AS autor_nome, u.id as autor_id, u.avatar_url as autor_avatar_url,
+                (SELECT COUNT(*) FROM comentario_likes cl WHERE cl.comentario_id = c.id) as like_count,
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM comentario_likes cl WHERE cl.comentario_id = c.id AND cl.autor_id = $2
+                ) THEN true ELSE false END AS is_liked_by_user
+            FROM comentarios c 
+            JOIN users u ON c.autor_id = u.id 
+            WHERE c.trilha_id = $1 
+            ORDER BY c.created_at DESC;
         `;
-        const commentsResult = await db.query(sql, [trilhaId, loggedInUserId]);
+        
+        const commentsResult = await db.query(sql, [idDaTrilha, loggedInUserId]);
         const comentarios = commentsResult.rows;
 
+        // Anexa as imagens a cada comentário (esta parte já estava correta)
         for (const comentario of comentarios) {
             const imagesResult = await db.query('SELECT id, nome_arquivo FROM comentario_imagens WHERE comentario_id = $1', [comentario.id]);
             comentario.imagens = imagesResult.rows;
         }
+
         res.json(comentarios);
     } catch (err) {
-        console.error("Erro em GET /api/trilhas/:id/comentarios:", err);
+        console.error("ERRO DETALHADO em /comentarios:", err.stack); // Log mais detalhado
         res.status(500).json({ error: "Erro ao buscar comentários." });
     }
 });
