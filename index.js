@@ -114,18 +114,15 @@ app.get('/api/trilhas', async (req, res) => {
     try {
         const loggedInUserId = req.user ? req.user.id : null;
         let baseQuery = `
-            SELECT t.id, t.nome, t.bairro, t.cidade, t.distancia_km, t.dificuldade, t.sinalizacao, 
-                   u.nome AS autor_nome, u.id AS autor_id,
-                   
-                   
-                   (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id ORDER BY ti.id ASC LIMIT 1) as imagem_principal_url,
-                 
+        SELECT t.*, u.nome AS autor_nome, u.id AS autor_id,
+               
+               -- PADRONIZAÇÃO APLICADA AQUI
+               (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id ORDER BY ti.id ASC LIMIT 1) as imagem_principal_url,
 
-                   CASE WHEN l.autor_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
-            FROM trilhas t
-            INNER JOIN users u ON t.autor_id = u.id
-            LEFT JOIN trilha_likes l ON t.id = l.trilha_id AND l.autor_id = $1
-        `;
+               CASE WHEN l.autor_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
+        FROM trilhas t
+        -- ... (resto da query e da lógica que já está correta)
+    `;
         const whereClauses = ["t.status = 'aprovada'"];
         const queryParams = [loggedInUserId];
         let paramIndex = 2;
@@ -152,14 +149,14 @@ app.get('/api/trilhas/sugestoes', async (req, res) => {
         if (isNaN(trilhaIdExcluida)) return res.status(400).json({ error: "ID a ser excluído é inválido." });
         
         const sql = `
-            SELECT t.id, t.nome, u.nome as autor_nome,
-                   
-                   -- AQUI ESTAVA 'ti.nome_arquivo', o correto é 'ti.caminho_arquivo'
-                   (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id LIMIT 1) as imagem_principal_url
-                   
-            FROM trilhas t JOIN users u ON t.autor_id = u.id
-            WHERE t.status = 'aprovada' AND t.id != $1 ORDER BY RANDOM() LIMIT 4;
-        `;
+        SELECT t.id, t.nome, u.nome as autor_nome,
+               
+               -- PADRONIZAÇÃO APLICADA AQUI
+               (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id ORDER BY ti.id ASC LIMIT 1) as imagem_principal_url
+
+        FROM trilhas t JOIN users u ON t.autor_id = u.id
+        WHERE t.status = 'aprovada' AND t.id != $1 ORDER BY RANDOM() LIMIT 4;
+    `;
         const result = await db.query(sql, [trilhaIdExcluida]);
         res.json(result.rows);
     } catch (err) {
@@ -513,11 +510,11 @@ app.put('/api/users/:id/avatar', uploadAvatar.single('avatar'), async (req, res)
 app.get('/api/admin/todas-as-trilhas', async (req, res) => {
     try {
         const result = await db.query(`
-            SELECT t.*, u.nome AS autor_nome, 
-            
-                   -- AQUI ESTAVA 'ti.nome_arquivo', o correto é 'ti.caminho_arquivo'
-                   (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id LIMIT 1) as imagem_principal_url
+            SELECT t.*, u.nome AS autor_nome,
                    
+                   -- PADRONIZAÇÃO APLICADA AQUI
+                   (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id ORDER BY ti.id ASC LIMIT 1) as imagem_principal_url
+
             FROM trilhas t JOIN users u ON t.autor_id = u.id ORDER BY t.created_at DESC;
         `);
         res.json(result.rows);
