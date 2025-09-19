@@ -1,55 +1,46 @@
 require("dotenv").config(); 
-
 const db = require("./db");
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const cloudinary = require('cloudinary').v2;
 
 const port = process.env.PORT || 5000;
 const app = express();
-const corsOptions = {
-  // Deixe o localhost para desenvolvimento e adicione a URL do seu Vercel quando a tiver.
-  // Por enquanto, podemos deixar aberto para o deploy inicial.
-  origin: '*' // ATENÇÃO: Em produção real, troque '*' pela URL do seu site, ex: "https://meu-trekit.vercel.app"
-};
-app.use(cors(corsOptions));
 
-// --- CONFIGURAÇÕES E MIDDLEWARES GLOBAIS ---
 app.use(express.json());
 app.use(cors());
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Garante que as pastas de upload existam ao iniciar o servidor
-fs.mkdirSync(path.join(__dirname, 'uploads/avatars'), { recursive: true });
-fs.mkdirSync(path.join(__dirname, 'uploads/comments'), { recursive: true });
-fs.mkdirSync(path.join(__dirname, 'uploads/trilhas'), { recursive: true });
+// --- CONFIGURAÇÃO CENTRALIZADA DO CLOUDINARY ---
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true // Garante que as URLs sejam sempre https
+});
 
-// --- CONFIGURAÇÃO DO MULTER (UPLOAD DE ARQUIVOS) ---
-const generateFilename = (prefix, file) => {
-    return prefix + '-' + Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
+// --- FUNÇÃO PARA CRIAR STORAGE NO CLOUDINARY ---
+const createCloudinaryStorage = (folderName) => {
+    return new CloudinaryStorage({
+        cloudinary: cloudinary,
+        params: {
+            folder: `trekit/${folderName}`,
+            allowed_formats: ['jpg', 'png', 'jpeg'],
+            // Otimização: redimensiona imagens grandes para um máximo de 1600x1600
+            transformation: [{ width: 1600, height: 1600, crop: "limit" }]
+        }
+    });
 };
 
-const avatarStorage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, 'uploads/avatars/'),
-    filename: (req, file, cb) => cb(null, generateFilename('avatar', file))
-});
-const uploadAvatar = multer({ storage: avatarStorage });
+// --- CONFIGURAÇÃO DO MULTER PARA USAR O CLOUDINARY ---
+const uploadAvatar = multer({ storage: createCloudinaryStorage('avatars') });
+const uploadComment = multer({ storage: createCloudinaryStorage('comments') });
+const uploadTrilha = multer({ storage: createCloudinaryStorage('trilhas') });
 
-const commentStorage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, 'uploads/comments/'),
-    filename: (req, file, cb) => cb(null, generateFilename('comentario', file))
-});
-const uploadComment = multer({ storage: commentStorage });
 
-const trilhaStorage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, 'uploads/trilhas/'),
-    filename: (req, file, cb) => cb(null, generateFilename('trilha', file))
-});
-const uploadTrilha = multer({ storage: trilhaStorage });
 
 // --- MIDDLEWARE DE AUTENTICAÇÃO (JWT) ---
 const decodeToken = (req, res, next) => {
@@ -218,6 +209,8 @@ app.post('/api/trilhas', uploadTrilha.array('imagens', 5), async (req, res) => {
         if (req.files && req.files.length > 0) {
             const imagePromises = req.files.map(file => {
                 const imageSql = `INSERT INTO trilha_imagens(trilha_id, nome_arquivo, caminho_arquivo) VALUES ($1, $2, $3);`;
+                // `file.filename` é o ID único do Cloudinary.
+                // `file.path` é a URL completa e segura (https://...)
                 return client.query(imageSql, [newTrilhaId, file.filename, file.path]);
             });
             await Promise.all(imagePromises);
@@ -317,8 +310,10 @@ app.post('/api/trilhas/:id/comentarios', uploadComment.array('imagens', 3), asyn
         const commentResult = await client.query('INSERT INTO comentarios(conteudo, trilha_id, autor_id) VALUES ($1, $2, $3) RETURNING id;', [conteudo || '', trilhaId, autor_id]);
         const newCommentId = commentResult.rows[0].id;
 
-        if (req.files && req.files.length > 0) {
-            const imagePromises = req.files.map(file => client.query(`INSERT INTO comentario_imagens(comentario_id, nome_arquivo, caminho_arquivo) VALUES ($1, $2, $3);`, [newCommentId, file.filename, file.path]));
+         if (req.files && req.files.length > 0) {
+            const imagePromises = req.files.map(file => {
+                return client.query(`INSERT INTO comentario_imagens(comentario_id, nome_arquivo, caminho_arquivo) VALUES ($1, $2, $3);`, [newCommentId, file.filename, file.path]);
+            });
             await Promise.all(imagePromises);
         }
         await client.query('COMMIT');
@@ -435,11 +430,16 @@ app.put('/api/users/:id/avatar', uploadAvatar.single('avatar'), async (req, res)
         if (!req.user || (req.user.id !== userId && req.user.role !== 'admin')) return res.status(403).json({ error: "Ação não autorizada." });
         if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
         
-        const avatarUrl = req.file.filename;
+        const avatarUrl = req.file.path; // A URL segura do Cloudinary
+
         const result = await db.query(`UPDATE users SET avatar_url = $1 WHERE id = $2 RETURNING id, nome, role, avatar_url, username, bio, email;`, [avatarUrl, userId]);
-        if (result.rows.length === 0) return res.status(404).json({ error: 'Usuário não encontrado.' });
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
         res.json(result.rows[0]);
     } catch (err) {
+        console.error("Erro em PUT /api/users/:id/avatar:", err);
         res.status(500).json({ error: "Erro interno ao atualizar o avatar." });
     }
 });
