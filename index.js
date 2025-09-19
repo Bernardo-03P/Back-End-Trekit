@@ -201,9 +201,6 @@ app.post('/api/trilhas', uploadTrilha.array('imagens', 5), async (req, res) => {
 
         const autor_id = req.user.id;
         
-        // ======================== CORREÇÃO DEFINITIVA AQUI ========================
-        // Em vez de desestruturação parcial, pegamos cada campo pelo nome.
-        // Isso garante que não haja ambiguidade e que cada variável tenha o valor correto.
         const { 
             nome, 
             bairro, 
@@ -215,7 +212,6 @@ app.post('/api/trilhas', uploadTrilha.array('imagens', 5), async (req, res) => {
             descricao, 
             mapa_embed_url 
         } = req.body;
-        // =======================================================================
         
         if (!nome || !bairro || !distancia_km || !dificuldade || !sinalizacao) {
             return res.status(400).json({ error: "Campos obrigatórios estão faltando." });
@@ -223,12 +219,10 @@ app.post('/api/trilhas', uploadTrilha.array('imagens', 5), async (req, res) => {
         
         const trilhaSql = `
             INSERT INTO trilhas(nome, bairro, localizacao_maps, distancia_km, tempo_min, dificuldade, sinalizacao, autor_id, descricao, mapa_embed_url) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)  -- <--- CORREÇÃO AQUI: Agora são 10 placeholders
             RETURNING id;
         `;
         
-        // ======================== E AQUI ========================
-        // Usamos as variáveis explícitas que definimos acima na ordem correta.
         const values = [
             nome, 
             bairro, 
@@ -241,7 +235,6 @@ app.post('/api/trilhas', uploadTrilha.array('imagens', 5), async (req, res) => {
             descricao, 
             mapa_embed_url
         ];
-        // ==========================================================
         
         const trilhaResult = await client.query(trilhaSql, values);
         const newTrilhaId = trilhaResult.rows[0].id;
@@ -261,7 +254,7 @@ app.post('/api/trilhas', uploadTrilha.array('imagens', 5), async (req, res) => {
         if (client) {
             await client.query('ROLLBACK');
         }
-        console.error("ERRO DETALHADO em POST /api/trilhas:", err.stack);
+        console.error("ERRO DETALHADO em POST /api/trilhas:", err.stack); // Esta linha é crucial para o debug
         res.status(500).json({ error: "Erro interno do servidor ao tentar criar a trilha." });
     } finally {
         if (client) {
