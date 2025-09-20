@@ -12,7 +12,29 @@ const port = process.env.PORT || 5000;
 const app = express();
 
 app.use(express.json());
-app.use(cors());
+const cors = require('cors');
+
+// --- CONFIGURAÇÃO DE CORS ---
+const allowedOrigins = [
+  'https://trekit.vercel.app', // Domínio do seu frontend em produção
+  'http://localhost:3000'      // Domínio para desenvolvimento local (se aplicável)
+];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Permite requisições sem 'origin' (como de apps mobile ou Postman)
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Não permitido pela política de CORS'));
+    }
+  },
+  credentials: true,
+  methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
+  optionsSuccessStatus: 200 // Alguns navegadores antigos engasgam com 204
+};
+
+app.use(cors(corsOptions));
 
 // --- CONFIGURAÇÃO CLOUDINARY E MULTER ---
 cloudinary.config({
