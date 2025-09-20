@@ -343,9 +343,9 @@ app.get('/api/trilhas/:id/comentarios', async (req, res) => {
         const commentsResult = await db.query(sql, [idDaTrilha, loggedInUserId]);
         const comentarios = commentsResult.rows;
 
-        // Anexa as imagens a cada comentário (esta parte já estava correta)
         for (const comentario of comentarios) {
-            const imagesResult = await db.query('SELECT id, nome_arquivo FROM comentario_imagens WHERE comentario_id = $1', [comentario.id]);
+            // ==== CORREÇÃO 1: Adicionado 'caminho_arquivo' na busca de imagens dos comentários ====
+            const imagesResult = await db.query('SELECT id, nome_arquivo, caminho_arquivo FROM comentario_imagens WHERE comentario_id = $1', [comentario.id]);
             comentario.imagens = imagesResult.rows;
         }
 
@@ -379,7 +379,9 @@ app.post('/api/trilhas/:id/comentarios', uploadComment.array('imagens', 3), asyn
         // Retornando o comentário completo para a UI
         const commentDetailsResult = await db.query('SELECT c.id, c.conteudo, c.created_at, u.nome AS autor_nome, u.id AS autor_id, u.avatar_url AS autor_avatar_url FROM comentarios c JOIN users u ON c.autor_id = u.id WHERE c.id = $1;', [newCommentId]);
         const novoComentario = commentDetailsResult.rows[0];
-        const imagesResult = await db.query('SELECT id, nome_arquivo FROM comentario_imagens WHERE comentario_id = $1;', [newCommentId]);
+        
+        // ==== CORREÇÃO 2: Adicionado 'caminho_arquivo' na resposta do novo comentário ====
+        const imagesResult = await db.query('SELECT id, nome_arquivo, caminho_arquivo FROM comentario_imagens WHERE comentario_id = $1;', [newCommentId]);
         novoComentario.imagens = imagesResult.rows;
         
         res.status(201).json(novoComentario);
