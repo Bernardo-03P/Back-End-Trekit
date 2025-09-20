@@ -405,11 +405,14 @@ app.get('/api/me/trilhas-curtidas', async (req, res) => {
     try {
         if (!req.user) return res.status(401).json({ error: "Autenticação necessária." });
         const loggedInUserId = req.user.id;
+        // ==== INÍCIO DA CORREÇÃO 1 ====
         const sql = `
-            SELECT t.*, u.nome AS autor_nome, true AS is_liked_by_user
+            SELECT t.*, u.nome AS autor_nome, true AS is_liked_by_user,
+                   (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id ORDER BY ti.id ASC LIMIT 1) as imagem_principal_url
             FROM trilha_likes l JOIN trilhas t ON l.trilha_id = t.id JOIN users u ON t.autor_id = u.id
             WHERE l.autor_id = $1 ORDER BY l.created_at DESC;
         `;
+        // ==== FIM DA CORREÇÃO 1 ====
         const result = await db.query(sql, [loggedInUserId]);
         res.json(result.rows);
     } catch (err) {
@@ -434,11 +437,15 @@ app.get('/api/users/:id/trilhas', async (req, res) => {
         const profileOwnerId = parseInt(req.params.id);
         const loggedInUserId = req.user ? req.user.id : null;
         if (isNaN(profileOwnerId)) return res.status(400).json({ error: "ID de usuário inválido." });
+        // ==== INÍCIO DA CORREÇÃO 2 ====
         const sql = `
-            SELECT t.*, u.nome AS autor_nome, CASE WHEN l.autor_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user
+            SELECT t.*, u.nome AS autor_nome, 
+                   CASE WHEN l.autor_id IS NOT NULL THEN true ELSE false END AS is_liked_by_user,
+                   (SELECT ti.caminho_arquivo FROM trilha_imagens ti WHERE ti.trilha_id = t.id ORDER BY ti.id ASC LIMIT 1) as imagem_principal_url
             FROM trilhas t JOIN users u ON t.autor_id = u.id LEFT JOIN trilha_likes l ON t.id = l.trilha_id AND l.autor_id = $1
             WHERE t.autor_id = $2 ORDER BY t.created_at DESC;
         `;
+        // ==== FIM DA CORREÇÃO 2 ====
         const result = await db.query(sql, [loggedInUserId, profileOwnerId]);
         res.json(result.rows);
     } catch (err) {
